@@ -1,31 +1,11 @@
-FROM python:3.11-slim
+FROM rhasspy/piper:latest
 
-# Install system dependencies required by Piper
-RUN apt-get update && apt-get install -y \
-    espeak-ng \
-    libespeak-ng1 \
-    libespeak-ng-dev \
-    alsa-utils \
-    libasound2-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
+# Copy your application files
+COPY . /app
 WORKDIR /app
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
+# Install any additional dependencies you need
+# RUN pip install -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application files
-COPY . .
-
-# Make piper executable
-RUN chmod +x ./piper
-
-# Expose port
-EXPOSE $PORT
-
-# Start command
-CMD uvicorn server:app --host 0.0.0.0 --port $PORT
+# Your startup command
+CMD ["your-startup-command"]
