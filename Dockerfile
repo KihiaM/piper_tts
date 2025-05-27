@@ -14,11 +14,10 @@ COPY requirements.txt .
 # Install Python dependencies including piper-tts
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy your application code
+# Copy your application code and your trained model
 COPY . .
 
-# Create voices directory if it doesn't exist
-RUN mkdir -p voices
+# No need to create voices directory since you have your own model
 
 # Expose port (adjust if your app uses a different port)
 EXPOSE 8000
