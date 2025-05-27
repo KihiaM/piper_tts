@@ -1,3 +1,7 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+piper-tts
+fastapi
+uvicorn
+numpy
+torch
+torchaudio
+# Add any other dependencies your app needs
