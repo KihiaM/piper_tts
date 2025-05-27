@@ -56,7 +56,7 @@ async def generate_speech(request: TTSRequest):
     try:
         # Use your own trained model
         # Replace 'your_model.onnx' with the actual filename of your trained model
-        voice_path = "your_model.onnx"  # Update this to your model filename
+        voice_path = "exported_model.onnx"  # Update this to your model filename
         
         # Check if voice file exists
         if not os.path.exists(voice_path):
