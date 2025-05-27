@@ -1,157 +1,104 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-import subprocess
-import uuid
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+import piper
+import io
+import wave
 import os
-import tempfile
-import platform
+from typing import Optional
 
-app = FastAPI(
-    title="Piper TTS API", 
-    version="1.0.0",
-    description="Text-to-Speech API using Piper TTS"
-)
+app = FastAPI()
 
-# Detect if we're on Windows or Linux
-IS_WINDOWS = platform.system() == "Windows"
+# Global variable to store loaded voice models
+loaded_voices = {}
 
-# Set paths based on environment
-if IS_WINDOWS:
-    # Local development paths
-    PIPER_PATH = "C:/Users/User/Documents/piper/piper.exe"
-    MODEL_PATH = "C:/Users/User/Documents/piper/exported_model.onnx"
-else:
-    # Cloud deployment paths (files in same directory as server.py)
-    PIPER_PATH = "./piper"
-    MODEL_PATH = "./exported_model.onnx"
+class TTSRequest(BaseModel):
+    text: str
+    voice: Optional[str] = "default"
+    speed: Optional[float] = 1.0
+
+def load_voice(voice_path: str):
+    """Load a Piper voice model"""
+    try:
+        if voice_path not in loaded_voices:
+            print(f"Loading voice model: {voice_path}")
+            loaded_voices[voice_path] = piper.PiperVoice.load(voice_path)
+        return loaded_voices[voice_path]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load voice model: {str(e)}")
+
+def text_to_speech(text: str, voice_model, speed: float = 1.0):
+    """Convert text to speech using Piper"""
+    try:
+        # Synthesize speech
+        audio_data = voice_model.synthesize(text, length_scale=1.0/speed)
+        
+        # Convert to WAV format
+        audio_bytes = io.BytesIO()
+        with wave.open(audio_bytes, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(voice_model.config.sample_rate)
+            wav_file.writeframes(audio_data.tobytes())
+        
+        audio_bytes.seek(0)
+        return audio_bytes
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
 
 @app.get("/")
-def read_root():
-    return {
-        "message": "🎤 Piper TTS API is running!",
-        "docs": "/docs",
-        "platform": platform.system(),
-        "endpoints": {
-            "health": "/health",
-            "synthesize": "/synthesize",
-            "documentation": "/docs"
-        }
-    }
+async def root():
+    return {"message": "Piper TTS Server is running"}
 
-@app.get("/health")
-def health_check():
-    """Check if Piper and model files are available"""
-    piper_exists = os.path.exists(PIPER_PATH)
-    model_exists = os.path.exists(MODEL_PATH)
-    
-    # Check if piper is executable (Linux only)
-    piper_executable = True
-    if not IS_WINDOWS and piper_exists:
-        piper_executable = os.access(PIPER_PATH, os.X_OK)
-    
-    status = "healthy" if (piper_exists and model_exists and piper_executable) else "unhealthy"
-    
-    return {
-        "status": status,
-        "piper_found": piper_exists,
-        "piper_executable": piper_executable,
-        "model_found": model_exists,
-        "piper_path": PIPER_PATH,
-        "model_path": MODEL_PATH,
-        "platform": platform.system(),
-        "working_directory": os.getcwd(),
-        "files_in_directory": os.listdir(".") if os.path.exists(".") else []
-    }
-
-@app.post("/synthesize")
-def synthesize(text: str):
-    """Convert text to speech using Piper TTS"""
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Text cannot be empty")
-    
-    if len(text) > 1000:
-        raise HTTPException(status_code=400, detail="Text too long (max 1000 characters)")
-   
-    output_file = f"output_{uuid.uuid4()}.wav"
-    
-    # Create a temporary text file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as temp_file:
-        temp_file.write(text)
-        temp_file_path = temp_file.name
-    
+@app.post("/tts")
+async def generate_speech(request: TTSRequest):
+    """Generate speech from text"""
     try:
-        # Check if files exist
-        if not os.path.exists(PIPER_PATH):
-            raise HTTPException(status_code=500, detail=f"Piper executable not found at {PIPER_PATH}")
-        if not os.path.exists(MODEL_PATH):
-            raise HTTPException(status_code=500, detail=f"Model file not found at {MODEL_PATH}")
+        # You can specify different voice models here
+        # Make sure you have the .onnx model files in your voices directory
+        voice_paths = {
+            "default": "voices/en_US-lessac-medium.onnx",
+            "female": "voices/en_US-lessac-medium.onnx",
+            "male": "voices/en_US-ryan-medium.onnx",
+            # Add more voices as needed
+        }
         
-        # Make piper executable on Linux
-        if not IS_WINDOWS:
-            try:
-                os.chmod(PIPER_PATH, 0o755)
-            except Exception as e:
-                print(f"Warning: Could not make piper executable: {e}")
+        voice_path = voice_paths.get(request.voice, voice_paths["default"])
         
-        # Use temp file as input
-        with open(temp_file_path, 'r', encoding='utf-8') as input_file:
-            result = subprocess.run(
-                [PIPER_PATH, "--model", MODEL_PATH, "--output_file", output_file],
-                stdin=input_file,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=True,
-                timeout=30  # 30 second timeout
+        # Check if voice file exists
+        if not os.path.exists(voice_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Voice model not found: {voice_path}. Please make sure the .onnx file is in the voices directory."
             )
         
-        print(f"Piper stdout: {result.stdout.decode()}")
-        print(f"Piper stderr: {result.stderr.decode()}")
+        # Load voice model
+        voice_model = load_voice(voice_path)
         
-        # Verify the file was created and has content
-        if not os.path.exists(output_file):
-            raise HTTPException(status_code=500, detail="Audio file was not generated")
+        # Generate speech
+        audio_data = text_to_speech(request.text, voice_model, request.speed)
         
-        file_size = os.path.getsize(output_file)
-        print(f"Generated audio file size: {file_size} bytes")
-        
-        if file_size < 1000:  # Less than 1KB might indicate empty audio
-            raise HTTPException(status_code=500, detail="Generated audio file appears to be empty or corrupted")
-        
-        # Add a small delay to ensure file is fully written
-        import time
-        time.sleep(0.1)
-        
-        # Clean up temp file before returning
-        try:
-            os.unlink(temp_file_path)
-        except:
-            pass
-        
-        return FileResponse(
-            output_file, 
+        return StreamingResponse(
+            io.BytesIO(audio_data.read()),
             media_type="audio/wav",
-            filename=f"speech_{uuid.uuid4().hex[:8]}.wav",
-            headers={
-                "Content-Disposition": "attachment",
-                "Cache-Control": "no-cache"
-            }
+            headers={"Content-Disposition": "attachment; filename=speech.wav"}
         )
-    
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=500, detail="Speech synthesis timed out")
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode() if e.stderr else str(e)
-        raise HTTPException(status_code=500, detail=f"Piper execution failed: {error_msg}")
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-    finally:
-        # Clean up temp file
-        try:
-            os.unlink(temp_file_path)
-        except:
-            pass
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-# For local development
+@app.get("/voices")
+async def list_voices():
+    """List available voice models"""
+    voices_dir = "voices"
+    if not os.path.exists(voices_dir):
+        return {"voices": [], "message": "No voices directory found"}
+    
+    voice_files = [f for f in os.listdir(voices_dir) if f.endswith('.onnx')]
+    return {"voices": voice_files}
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
