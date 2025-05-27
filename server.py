@@ -54,22 +54,15 @@ async def root():
 async def generate_speech(request: TTSRequest):
     """Generate speech from text"""
     try:
-        # You can specify different voice models here
-        # Make sure you have the .onnx model files in your voices directory
-        voice_paths = {
-            "default": "voices/en_US-lessac-medium.onnx",
-            "female": "voices/en_US-lessac-medium.onnx",
-            "male": "voices/en_US-ryan-medium.onnx",
-            # Add more voices as needed
-        }
-        
-        voice_path = voice_paths.get(request.voice, voice_paths["default"])
+        # Use your own trained model
+        # Replace 'your_model.onnx' with the actual filename of your trained model
+        voice_path = "your_model.onnx"  # Update this to your model filename
         
         # Check if voice file exists
         if not os.path.exists(voice_path):
             raise HTTPException(
                 status_code=404, 
-                detail=f"Voice model not found: {voice_path}. Please make sure the .onnx file is in the voices directory."
+                detail=f"Voice model not found: {voice_path}. Please make sure your trained .onnx file is in the root directory."
             )
         
         # Load voice model
@@ -92,11 +85,7 @@ async def generate_speech(request: TTSRequest):
 @app.get("/voices")
 async def list_voices():
     """List available voice models"""
-    voices_dir = "voices"
-    if not os.path.exists(voices_dir):
-        return {"voices": [], "message": "No voices directory found"}
-    
-    voice_files = [f for f in os.listdir(voices_dir) if f.endswith('.onnx')]
+    voice_files = [f for f in os.listdir(".") if f.endswith('.onnx')]
     return {"voices": voice_files}
 
 if __name__ == "__main__":
